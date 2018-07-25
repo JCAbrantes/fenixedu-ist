@@ -2,6 +2,7 @@ package pt.ist.registration.process.ui.service;
 
 import static org.fenixedu.bennu.RegistrationProcessConfiguration.RESOURCE_BUNDLE;
 
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.List;
@@ -39,6 +40,7 @@ import pt.ist.drive.sdk.DriveClient;
 import pt.ist.fenixframework.Atomic;
 import pt.ist.fenixframework.Atomic.TxMode;
 import pt.ist.registration.process.domain.RegistrationDeclarationFile;
+import pt.ist.registration.process.domain.RegistrationDeclarationFileState;
 import pt.ist.registration.process.handler.CandidacySignalHandler;
 
 @Service
@@ -98,10 +100,21 @@ public class SignCertAndStoreService {
 
     public void sendDocumentToBeCertified(String registrationExternalId, String filename, MultipartFile file,
             String uniqueIdentifier, boolean alreadyCertified) {
+
+        try {
+            sendDocumentToBeCertified(registrationExternalId, filename, file.getBytes(), uniqueIdentifier, alreadyCertified);
+        } catch (final IOException e) {
+            throw new Error(e);
+        }
+    }
+
+    public void sendDocumentToBeCertified(String registrationExternalId, String filename, byte[] fileBytes,
+            String uniqueIdentifier, boolean alreadyCertified) {
         String compactJws = Jwts.builder().setSubject(uniqueIdentifier)
                 .signWith(SignatureAlgorithm.HS512, RegistrationProcessConfiguration.certifierJwtSecret()).compact();
 
-        try (final FormDataMultiPart formDataMultiPart = new FormDataMultiPart(); InputStream fileStream = file.getInputStream()) {
+        try (final FormDataMultiPart formDataMultiPart = new FormDataMultiPart();
+                InputStream fileStream = new ByteArrayInputStream(fileBytes)) {
             final StreamDataBodyPart streamDataBodyPart =
                     new StreamDataBodyPart("file", fileStream, filename, new MediaType("application", "pdf"));
             formDataMultiPart.bodyPart(streamDataBodyPart);
@@ -125,15 +138,23 @@ public class SignCertAndStoreService {
 
     public void sendDocumentToBeStored(String username, String email, RegistrationDeclarationFile declarationFile, MultipartFile file) throws
             IOException {
+        sendDocumentToBeStored(username, email, declarationFile, file.getBytes(), file.getContentType());
+    }
+
+    public void sendDocumentToBeStored(String username, String email, RegistrationDeclarationFile declarationFile,
+            byte[] fileBytes, String fileContentType) throws IOException {
         DriveClient driveClient = ClientFactory.driveCLient(driveUrl, appId, appUser, refreshToken);
         String directory = uploadDirectoryFor(driveClient, username).get();
-        try (InputStream fileStream = file.getInputStream()) {
-            JsonObject result = driveClient.uploadWithInfo(directory, declarationFile.getFilename(), fileStream, file.getContentType());
-            logger.debug("Registration Declaration {} of student {} stored", declarationFile.getUniqueIdentifier(), username);
-            logger.debug("Registration Declaration {} of student {} is being emailed.", declarationFile.getUniqueIdentifier(), username);
-            sendEmailNotification(email, declarationFile.getDisplayName(), result.get("downloadFileLink").getAsString(),
-                    declarationFile.getLocale());
-        }
+        InputStream fileStream = new ByteArrayInputStream(fileBytes);
+        JsonObject result =
+                driveClient.uploadWithInfo(directory, declarationFile.getFilename(), fileStream, fileContentType);
+        logger.debug("Registration Declaration {} of student {} stored", declarationFile.getUniqueIdentifier(), username);
+        logger.debug("Registration Declaration {} of student {} is being emailed.", declarationFile.getUniqueIdentifier(),
+                username);
+        final String downloadFileLink = result.get("downloadFileLink").getAsString();
+        declarationFile.updateState(RegistrationDeclarationFileState.STORED, null, null, downloadFileLink);
+        sendEmailNotification(email, declarationFile.getDisplayName(), downloadFileLink, declarationFile.getLocale());
+
     }
 
     @Atomic(mode = TxMode.WRITE)

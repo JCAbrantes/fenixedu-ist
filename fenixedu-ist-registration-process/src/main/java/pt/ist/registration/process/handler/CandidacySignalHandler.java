@@ -16,6 +16,8 @@ import pt.ist.fenixframework.Atomic;
 import pt.ist.fenixframework.Atomic.TxMode;
 import pt.ist.registration.process.domain.DeclarationTemplate;
 import pt.ist.registration.process.domain.RegistrationDeclarationFile;
+import pt.ist.registration.process.domain.RegistrationDeclarationFileState;
+import pt.ist.registration.process.domain.SignerJob;
 import pt.ist.registration.process.ui.service.RegistrationDeclarationCreatorService;
 import pt.ist.registration.process.ui.service.SignCertAndStoreService;
 import pt.ist.registration.process.ui.service.exception.ProblemsGeneratingDocumentException;
@@ -29,11 +31,14 @@ public class CandidacySignalHandler implements Consumer<RegistrationCreatedByCan
     private final RegistrationDeclarationCreatorService documentService;
     private final SignCertAndStoreService signCertAndStoreService;
 
+    private final EmployerInitializer employerInitializer;
+
     @Autowired
     public CandidacySignalHandler(RegistrationDeclarationCreatorService documentService,
-            SignCertAndStoreService signCertAndStoreService) {
+            SignCertAndStoreService signCertAndStoreService, EmployerInitializer employerInitializer) {
         this.documentService = documentService;
         this.signCertAndStoreService = signCertAndStoreService;
+        this.employerInitializer = employerInitializer;
     }
 
     @Override
@@ -55,17 +60,27 @@ public class CandidacySignalHandler implements Consumer<RegistrationCreatedByCan
         try {
 
             RegistrationDeclarationFile registrationDeclarationFile = documentService.generateAndSaveFile(registration, executionYear, declarationTemplate);
-
-            String filename = registrationDeclarationFile.getFilename();
-            String title = registrationDeclarationFile.getDisplayName();
             String queue = getQueue(registration);
+
+            employerInitializer.getEmployer()
+                    .offer(new SignerJob(signCertAndStoreService, registration, registrationDeclarationFile, queue));
             
-            String externalIdentifier = registrationDeclarationFile.getUniqueIdentifier();
-            signCertAndStoreService.sendDocumentToBeSigned(registration.getExternalId(), queue, title, title, filename,
-                    registrationDeclarationFile.getStream(), externalIdentifier);
         } catch (ProblemsGeneratingDocumentException e) {
             logger.error("Error generating registration declaration document", e);
         }
+    }
+
+    public void sendDocumentToBeSigned(Registration registration, ExecutionYear executionYear,
+            RegistrationDeclarationFile registrationDeclarationFile) {
+
+        String filename = registrationDeclarationFile.getFilename();
+        String title = registrationDeclarationFile.getDisplayName();
+        String queue = getQueue(registration);
+        String externalIdentifier = registrationDeclarationFile.getUniqueIdentifier();
+
+        signCertAndStoreService.sendDocumentToBeSigned(registration.getExternalId(), queue, title, title, filename,
+                registrationDeclarationFile.getStream(), externalIdentifier);
+        registrationDeclarationFile.updateState(RegistrationDeclarationFileState.PENDING);
     }
 
     private String getQueue(Registration registration) {
