@@ -49,6 +49,12 @@ public class SignedDeclarationsController {
             logger.debug("Registration Declaration {} of student {} was signed.",uniqueIdentifier, registration.getNumber());
             logger.debug("Registration Declaration {} of student {} sent to be certified", uniqueIdentifier, registration.getNumber());
 
+            RegistrationDeclarationFileState state = declarationFile.getState();
+
+            if (state == RegistrationDeclarationFileState.CERTIFIED || state == RegistrationDeclarationFileState.STORED) {
+                return "ok";
+            }
+
             try {
                 byte[] fileBytes = file.getBytes();
                 declarationFile.updateState(RegistrationDeclarationFileState.SIGNED, fileBytes, file.getContentType());
@@ -74,6 +80,12 @@ public class SignedDeclarationsController {
             try {
                 logger.debug("Registration Declaration {} of student {} was certified.", uniqueIdentifier, registration.getNumber());
                 logger.debug("Registration Declaration {} of student {} sent out to be stored.", uniqueIdentifier, registration.getNumber());
+
+                RegistrationDeclarationFileState state = declarationFile.getState();
+
+                if (state == RegistrationDeclarationFileState.STORED) {
+                    return "ok";
+                }
 
                 byte[] fileBytes = file.getBytes();
                 String fileContentType = file.getContentType();
